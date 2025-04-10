@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Diet Parkour Game</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #222;
+      color: #fff;
+      text-align: center;
+      margin: 0;
+      padding: 10px;
+    }
+    canvas {
+      background: #88c;
+      display: block;
+      margin: 20px auto;
+      border: 4px solid #000;
+    }
+    .controls {
+      margin-top: 10px;
+    }
+    .btn {
+      background: #0f0;
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 20px;
+      border: none;
+      border-radius: 5px;
+    }
+    .btn:active {
+      background: #0c0;
+    }
+  </style>
+</head>
+<body>
+  <h1>🍎 Diet Parkour Game</h1>
+  <p id="info">Vidas: 3 | Nivel: 1</p>
+  <canvas id="gameCanvas" width="800" height="450"></canvas>
+  <div class="controls">
+    <!-- Botones para dispositivos táctiles -->
+    <button class="btn" id="left">←</button>
+    <button class="btn" id="right">→</button>
+    <button class="btn" id="up">↑</button>
+  </div>
+
+  <script>
+    /* VARIABLES GLOBALES DEL JUEGO */
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    let lives = 3;
+    let level = 1;
+    const maxLevel = 15;
+    let secretMode = false; // Modo nivel secreto (Easter Egg)
+    let score = 0;
+    const questions = [
+      "Do you like sweet food?",
+      "Do you exercise?",
+      "Do you eat vegetables?",
+      "Do you eat fast food?",
+      "Do you drink water daily?",
+      "Do you eat breakfast?",
+      "Do you sleep well?",
+      "Do you eat fruits?",
+      "Do you prefer healthy food?"
+    ];
+    let answers = [];
+
+    // Jugador
+    const player = {
+      x: 50,
+      y: 370,
+      w: 40,
+      h: 40,
+      vx: 0,
+      vy: 0,
+      onGround: false
+    };
+
+    // Controles
+    let keys = { left: false, right: false, up: false };
+    const gravity = 0.6;
+    const ground = 370; // Posición vertical fija para el suelo
+
+    // Enemigos y jefe
+    let enemies = [];
+    let boss = null;
+
+    // Checkpoints: definimos un conjunto de checkpoints (por ejemplo, en x=50, x=300 y x=600)
+    // El checkpoint actual se actualiza a medida que avanzas.
+    let currentCheckpoint = { x: 50, y: ground };
+
+    // Definición de posiciones de checkpoints en el nivel (excepto nivel jefe final)
+    const checkpointPositions = [50, 300, 600];
+
+    // Easter Egg: Área secreta en el nivel 7 (invisible en condiciones normales)
+    const secretArea = { x: 700, y: 50, w: 30, h: 30 };
+
+    /* FUNCIONES DEL JUEGO */
+
+    // Reinicia la posición del jugador al último checkpoint alcanzado
+    function resetPlayer() {
+      player.x = currentCheckpoint.x;
+      player.y = currentCheckpoint.y;
+      player.vx = 0;
+      player.vy = 0;
+    }
+
+    // Genera enemigos según el nivel. La cantidad y velocidad aumentan conforme sube el nivel.
+    function spawnEnemies() {
+      enemies = [];
+      // Cantidad de enemigos: aumenta con el nivel
+      const enemyCount = level + Math.floor(level / 3);
+      for (let i = 0; i < enemyCount; i++) {
+        // Los enemigos se distribuyen a lo largo del nivel
+        const ex = 150 + i * 80;
+        const ey = ground;
+        const speed = 1 + level * 0.2;
+        enemies.push({ x: ex, y: ey, w: 30, h: 30, vx: -speed, vy: 0, jumpTimer: 0 });
+      }
+    }
+
+    // Actualiza la información en pantalla
+    function updateInfo() {
+      document.getElementById("info").textContent = `Vidas: ${lives} | Nivel: ${level}${secretMode ? " [Secreto]" : ""}`;
+    }
+
+    // Función para detectar colisiones entre dos rectángulos
+    function collide(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x &&
+             a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    // Verifica si el jugador ha alcanzado un nuevo checkpoint en el nivel
+    function updateCheckpoint() {
+      // Solo actualizamos si no estamos en nivel secreto o boss final
+      if (level < maxLevel || (level === maxLevel && !boss)) {
+        checkpointPositions.forEach(pos => {
+          if (player.x >= pos && currentCheckpoint.x < pos) {
+            currentCheckpoint = { x: pos, y: ground };
+            // Notifica visualmente (por ejemplo, un sonido o alerta breve)
+            console.log(`Checkpoint alcanzado en x = ${pos}`);
+          }
+        });
+      }
+    }
+
+    // Lógica del Easter Egg: en el nivel 7, si el jugador entra en el área secreta, activa el modo secreto.
+    function checkSecretArea() {
+      if (level === 7 && !secretMode && collide(player, secretArea)) {
+        secretMode = true;
+        alert("🥚 Easter Egg Activated! Welcome to the secret level: SUPER DIFFICULT!");
+        // Genera enemigos con mayor dificultad para el nivel secreto.
+        spawnSecretEnemies();
+      }
+    }
+
+    // Genera enemigos aún más difíciles para el nivel secreto.
+    function spawnSecretEnemies() {
+      enemies = [];
+      const enemyCount = level + 5;
+      for (let i = 0; i < enemyCount; i++) {
+        const ex = 150 + i * 60;
+        const ey = ground;
+        const speed = 2 + level * 0.3;
+        enemies.push({ x: ex, y: ey, w: 30, h: 30, vx: -speed, vy: 0, jumpTimer: 0 });
+      }
+    }
+
+    // Actualiza la lógica del juego y los movimientos
+    function update() {
+      // Movimiento horizontal continuo según las teclas o botones presionados
+      if (keys.left) player.vx = -3;
+      else if (keys.right) player.vx = 3;
+      else player.vx = 0;
+      player.x += player.vx;
+
+      // Actualización de salto y gravedad
+      player.vy += gravity;
+      player.y += player.vy;
+      if (player.y >= ground) {
+        player.y = ground;
+        player.vy = 0;
+        player.onGround = true;
+      } else {
+        player.onGround = false;
+      }
+
+      // Actualizamos el checkpoint si se alcanza una posición nueva
+      updateCheckpoint();
+
+      // Actualiza el movimiento de cada enemigo (simulando parkour, saltan de vez en cuando)
+      enemies.forEach(enemy => {
+        enemy.x += enemy.vx;
+        enemy.jumpTimer++;
+        if (enemy.jumpTimer > 120 && Math.random() < 0.03) {
+          enemy.vy = -8;
+          enemy.jumpTimer = 0;
+        }
+        enemy.vy += gravity;
+        enemy.y += enemy.vy;
+        if (enemy.y >= ground) {
+          enemy.y = ground;
+          enemy.vy = 0;
+        }
+      });
+
+      // Si un enemigo sale del canvas, lo reubica a la derecha para que siga apareciendo
+      enemies.forEach(enemy => {
+        if (enemy.x + enemy.w < 0) {
+          enemy.x = canvas.width + Math.random() * 50;
+        }
+      });
+
+      // Si estamos en el último nivel y hay jefe, actualizamos su movimiento
+      if (level === maxLevel && boss) {
+        boss.x += boss.vx;
+        if (boss.x <= canvas.width - 300 || boss.x >= canvas.width - 100) {
+          boss.vx *= -1;
+        }
+        // Colisión con jefe final
+        if (collide(player, boss)) {
+          alert("🎉 You beat the final boss!");
+          finishGame();
+          return;
+        }
+      }
+
+      // Verifica colisiones del jugador con enemigos
+      enemies.forEach(enemy => {
+        if (collide(player, enemy)) {
+          loseLife();
+        }
+      });
+
+      // Si el jugador llega al final del nivel (lado derecho del canvas),
+      // se avanza al siguiente nivel
+      if (player.x > canvas.width - 60) {
+        nextLevel();
+      }
+
+      // Verifica el Easter Egg en el nivel 7
+      if (level === 7) checkSecretArea();
+
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    // Dibuja todo el escenario: fondo, jugador, enemigos, jefe y checkpoints
+    function draw() {
+      // Fondo
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#44f";
+      ctx.fillRect(0, ground + 40, canvas.width, canvas.height - ground);
+
+      // Jugador (estilo 8-bit)
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+
+      // Enemigos
+      ctx.fillStyle = "red";
+      enemies.forEach(enemy => {
+        ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
+      });
+
+      // Jefe final (último nivel)
+      if (level === maxLevel && boss) {
+        ctx.fillStyle = "purple";
+        ctx.fillRect(boss.x, boss.y, boss.w, boss.h);
+      }
+
+      // Dibujar los checkpoints definidos en el nivel (por ejemplo, en x = 50, 300 y 600)
+      ctx.fillStyle = "gold";
+      checkpointPositions.forEach(pos => {
+        // Dibuja la bandera en cada checkpoint alcanzable
+        ctx.fillRect(pos, ground - 50, 10, 50);
+        ctx.fillStyle = "goldenrod";
+        ctx.fillRect(pos, ground - 50, 30, 10);
+        ctx.fillStyle = "gold"; // Restablecemos el color para el siguiente
+      });
+
+      // (Opcional) Dibujar el área secreta en el nivel 7 (comentado para no revelar el easter egg)
+      /*
+      if(level === 7){
+        ctx.fillStyle = "rgba(255,255,0,0.3)";
+        ctx.fillRect(secretArea.x, secretArea.y, secretArea.w, secretArea.h);
+      }
+      */
+    }
+
+    // Disminuye una vida y devuelve al jugador al último checkpoint sin reiniciar todo el nivel
+    function loseLife() {
+      lives--;
+      updateInfo();
+      resetPlayer();
+      if (lives <= 0) {
+        alert("💀 Game Over!");
+        restartGame();
+      }
+    }
+
+    // Avanza al siguiente nivel
+    function nextLevel() {
+      // Antes de avanzar, reseteamos el checkpoint al inicio del nuevo nivel
+      currentCheckpoint = { x: 50, y: ground };
+      level++;
+      // Si alcanzamos el último nivel, creamos el jefe final
+      if (level === maxLevel) {
+        boss = { x: canvas.width - 150, y: ground, w: 80, h: 80, vx: -1.5 };
+        enemies = [];
+      } else {
+        spawnEnemies();
+      }
+      resetPlayer();
+      updateInfo();
+    }
+
+    // Al finalizar el juego, se hacen las preguntas para personalizar la dieta
+    function finishGame() {
+      let diet = "Your diet is: ";
+      for (let i = 0; i < questions.length; i++) {
+        let ans = prompt(questions[i], "yes/no");
+        answers.push(ans);
+      }
+      // Lógica sencilla para determinar la dieta
+      if (answers.filter(a => a.toLowerCase() === "no").length > answers.length / 2) {
+        diet += "More veggies and water!";
+      } else {
+        diet += "Keep going strong!";
+      }
+      alert(diet);
+      restartGame();
+    }
+
+    // Reinicia el juego completo
+    function restartGame() {
+      lives = 3;
+      level = 1;
+      secretMode = false;
+      answers = [];
+      boss = null;
+      spawnEnemies();
+      currentCheckpoint = { x: 50, y: ground };
+      resetPlayer();
+      updateInfo();
+    }
+
+    /* EVENTOS DE CONTROL: Teclado y botones táctiles */
+    document.addEventListener("keydown", e => {
+      if (e.key === "ArrowLeft") keys.left = true;
+      if (e.key === "ArrowRight") keys.right = true;
+      if (e.key === "ArrowUp" && player.onGround) {
+        player.vy = -12;  // Salto potente
+        player.onGround = false;
+      }
+    });
+    document.addEventListener("keyup", e => {
+      if (e.key === "ArrowLeft") keys.left = false;
+      if (e.key === "ArrowRight") keys.right = false;
+    });
+    // Controles táctiles
+    document.getElementById("left").addEventListener("touchstart", () => keys.left = true);
+    document.getElementById("right").addEventListener("touchstart", () => keys.right = true);
+    document.getElementById("up").addEventListener("touchstart", () => {
+      if (player.onGround) {
+        player.vy = -12;
+        player.onGround = false;
+      }
+    });
+    document.getElementById("left").addEventListener("touchend", () => keys.left = false);
+    document.getElementById("right").addEventListener("touchend", () => keys.right = false);
+
+    /* INICIAR EL JUEGO */
+    spawnEnemies();
+    updateInfo();
+    update();
+  </script>
+</body>
+</html>
